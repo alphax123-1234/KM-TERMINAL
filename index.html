@@ -23,7 +23,7 @@
         }
         .terminal {
             display: grid;
-            grid-template-columns: 240px 1fr;
+            grid-template-columns: 280px 1fr;
             grid-template-rows: 40px 1fr;
             gap: 6px;
             height: 100%;
@@ -143,6 +143,21 @@
             padding: 2px 8px;
             border-radius: 4px;
         }
+        .status-msg {
+            padding: 8px 16px;
+            font-size: 12px;
+            color: #6b7a8f;
+            border-bottom: 1px solid #1e222d;
+        }
+        .loading {
+            color: #ffaa00;
+        }
+        .error {
+            color: #ff3333;
+        }
+        .success {
+            color: #00ff66;
+        }
     </style>
 </head>
 <body>
@@ -161,32 +176,54 @@
                 </div>
             </div>
         </div>
-        <div class="watchlist" id="watchlist"></div>
+        <div class="watchlist" id="watchlist">
+            <div class="status-msg loading">⏳ Loading Ugandan stocks...</div>
+        </div>
         <div class="chart-panel">
             <div id="chart-container"></div>
         </div>
     </div>
     <script>
-        // ----- CONFIG -----
-        const MANSA_TOKEN = 'YOUR_API_KEY';
+        // ============================================================
+        //  ⚠️ CONFIGURATION - PASTE YOUR API KEY HERE
+        // ============================================================
+        const MANSA_TOKEN = 'YOUR_API_KEY_HERE'; // <-- REPLACE WITH YOUR KEY
+        const EXCHANGE_CODE = 'USE';
         const API_BASE = 'https://mansaapi.com';
         const CACHE_KEY = 'use_market_cache';
         const TTL_MS = 30 * 60 * 1000;
-        const TICKERS = ['MTNU', 'SBU', 'UCL'];
 
-        // ----- FALLBACK MOCK (UGX) -----
+        // ============================================================
+        //  FALLBACK DATA (works without API)
+        // ============================================================
+        const FALLBACK_STOCKS = [
+            { ticker: 'MTNU', name: 'MTN Uganda', sector: 'Telecom' },
+            { ticker: 'SBU', name: 'Stanbic Bank Uganda', sector: 'Banking' },
+            { ticker: 'UCL', name: 'Uganda Clays Limited', sector: 'Manufacturing' },
+            { ticker: 'DFCU', name: 'DFCU Bank', sector: 'Banking' },
+            { ticker: 'BOBU', name: 'Bank of Baroda Uganda', sector: 'Banking' },
+            { ticker: 'NIC', name: 'National Insurance Corp', sector: 'Insurance' }
+        ];
+
         const FALLBACK_DATA = {
-            MTNU: { price: 2450, change_pct: 0.8, history: [2420, 2430, 2440, 2450, 2460, 2455, 2450, 2445, 2450, 2455] },
-            SBU: { price: 380, change_pct: -1.2, history: [390, 388, 385, 382, 380, 378, 375, 372, 370, 368] },
-            UCL: { price: 125, change_pct: 2.4, history: [118, 120, 122, 124, 125, 126, 127, 128, 129, 130] }
+            MTNU: { price: 2450.50, change_pct: 0.8, volume: 15000, high: 2480, low: 2390 },
+            SBU: { price: 380.00, change_pct: -1.2, volume: 8500, high: 385, low: 375 },
+            UCL: { price: 125.00, change_pct: 2.4, volume: 3200, high: 128, low: 122 },
+            DFCU: { price: 45.00, change_pct: 0.0, volume: 2100, high: 46, low: 44 },
+            BOBU: { price: 12.50, change_pct: -0.5, volume: 1800, high: 13, low: 12 },
+            NIC: { price: 8.50, change_pct: 1.2, volume: 950, high: 9, low: 8 }
         };
 
-        // ----- STATE -----
+        // ============================================================
+        //  STATE
+        // ============================================================
         let currentTicker = 'MTNU';
         let chart = null;
         let lineSeries = null;
         let cachedData = null;
         let cacheTimestamp = null;
+        let allStocks = [];
+
         const watchlistEl = document.getElementById('watchlist');
         const container = document.getElementById('chart-container');
         const cacheIndicator = document.getElementById('cache-indicator');
@@ -194,12 +231,14 @@
         const beacon = document.getElementById('network-beacon');
         const networkLabel = document.getElementById('network-label');
 
-        // ----- HELPERS -----
-        function generateHistory(basePrice, days = 25) {
+        // ============================================================
+        //  HELPERS
+        // ============================================================
+        function generateHistory(basePrice, days = 30) {
             const arr = [];
-            let price = basePrice * 0.88;
+            let price = basePrice * 0.85;
             for (let i = 0; i < days; i++) {
-                const change = (Math.random() - 0.45) * 0.04;
+                const change = (Math.random() - 0.45) * 0.05;
                 price = price * (1 + change);
                 if (price < 0.1) price = basePrice * 0.5;
                 arr.push(Math.round(price * 100) / 100);
@@ -207,15 +246,6 @@
             arr[arr.length - 1] = basePrice;
             return arr;
         }
-
-        function ensureFallbackHistory() {
-            for (const t of TICKERS) {
-                if (!FALLBACK_DATA[t].history || FALLBACK_DATA[t].history.length < 10) {
-                    FALLBACK_DATA[t].history = generateHistory(FALLBACK_DATA[t].price, 25);
-                }
-            }
-        }
-        ensureFallbackHistory();
 
         function buildHistoryDates(length) {
             const dates = [];
@@ -231,12 +261,19 @@
         function mapHistoryToChart(historyArray) {
             const dates = buildHistoryDates(historyArray.length);
             return historyArray.map((val, idx) => ({
-                time: dates[idx] || `2025-01-${String(idx+1).padStart(2,'0')}`,
+                time: dates[idx],
                 value: val
             }));
         }
 
-        // ----- CACHE -----
+        function setBeaconOnline(online) {
+            beacon.className = online ? 'beacon' : 'beacon off';
+            networkLabel.textContent = online ? 'LIVE' : 'OFFLINE';
+        }
+
+        // ============================================================
+        //  CACHE
+        // ============================================================
         function loadCache() {
             try {
                 const raw = localStorage.getItem(CACHE_KEY);
@@ -269,70 +306,90 @@
             }
         }
 
-        function setBeaconOnline(online) {
-            beacon.className = online ? 'beacon' : 'beacon off';
-            networkLabel.textContent = online ? 'LIVE' : 'OFFLINE';
+        function showStatus(message, type = 'loading') {
+            watchlistEl.innerHTML = `<div class="status-msg ${type}">${message}</div>`;
         }
 
-        // ----- API FETCH -----
-        async function fetchMarketData() {
-            setBeaconOnline(true);
+        // ============================================================
+        //  API ENDPOINT 1: GET ALL STOCKS ON USE
+        // ============================================================
+        async function getUSEStocks() {
             try {
-                if (!MANSA_TOKEN || MANSA_TOKEN === 'YOUR_API_KEY') {
-                    throw new Error('API token missing');
-                }
-                const response = await fetch(`${API_BASE}/stocks`, {
-                    headers: {
-                        'Authorization': 'Bearer ' + MANSA_TOKEN,
-                        'Accept': 'application/json'
+                const response = await fetch(
+                    `${API_BASE}/api/v1/markets/exchanges/${EXCHANGE_CODE}/stocks`,
+                    {
+                        headers: {
+                            'Authorization': 'Bearer ' + MANSA_TOKEN,
+                            'Accept': 'application/json'
+                        }
                     }
-                });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
-                const json = await response.json();
-                // expected: array of { symbol, price, change_pct, historical: [...] }
-                const mapped = {};
-                for (const item of json) {
-                    const sym = item.symbol;
-                    if (!sym) continue;
-                    const history = item.historical && Array.isArray(item.historical) ?
-                        item.historical.map(v => Number(v)) :
-                        generateHistory(Number(item.price) || 100, 25);
-                    mapped[sym] = {
-                        price: Number(item.price) || 0,
-                        change_pct: Number(item.change_pct) || 0,
-                        history: history
-                    };
-                }
-                // ensure fallback for missing tickers
-                for (const t of TICKERS) {
-                    if (!mapped[t]) {
-                        mapped[t] = {
-                            price: FALLBACK_DATA[t].price,
-                            change_pct: FALLBACK_DATA[t].change_pct,
-                            history: FALLBACK_DATA[t].history.slice()
-                        };
-                    }
-                }
-                return mapped;
-            } catch (err) {
-                setBeaconOnline(false);
-                // fallback mock
-                const fallback = {};
-                for (const t of TICKERS) {
-                    fallback[t] = {
-                        price: FALLBACK_DATA[t].price,
-                        change_pct: FALLBACK_DATA[t].change_pct,
-                        history: FALLBACK_DATA[t].history.slice()
-                    };
-                }
-                return fallback;
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.warn('Failed to fetch stocks list, using fallback:', error);
+                return FALLBACK_STOCKS;
             }
         }
 
-        // ----- CHART RENDER -----
-        function renderChart(ticker, historyArray) {
+        // ============================================================
+        //  API ENDPOINT 2: GET LIVE DATA FOR A STOCK
+        // ============================================================
+        async function getStockData(ticker) {
+            try {
+                const response = await fetch(
+                    `${API_BASE}/api/v1/markets/exchanges/${EXCHANGE_CODE}/stocks/${ticker}`,
+                    {
+                        headers: {
+                            'Authorization': 'Bearer ' + MANSA_TOKEN,
+                            'Accept': 'application/json'
+                        }
+                    }
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.warn(`Failed to fetch ${ticker}, using fallback:`, error);
+                return FALLBACK_DATA[ticker] || { price: 100, change_pct: 0, volume: 0 };
+            }
+        }
+
+        // ============================================================
+        //  API ENDPOINT 3: GET HISTORICAL DATA FOR CHART
+        // ============================================================
+        async function getStockHistory(ticker, range = '1M') {
+            try {
+                const response = await fetch(
+                    `${API_BASE}/api/v1/markets/exchanges/${EXCHANGE_CODE}/stocks/${ticker}/history?range=${range}`,
+                    {
+                        headers: {
+                            'Authorization': 'Bearer ' + MANSA_TOKEN,
+                            'Accept': 'application/json'
+                        }
+                    }
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.warn(`Failed to fetch history for ${ticker}, generating mock:`, error);
+                const basePrice = FALLBACK_DATA[ticker]?.price || 100;
+                return generateHistory(basePrice, 30).map((val, idx) => ({
+                    date: buildHistoryDates(30)[idx],
+                    close: val,
+                    open: val * 0.98,
+                    high: val * 1.02,
+                    low: val * 0.97
+                }));
+            }
+        }
+
+        // ============================================================
+        //  CHART RENDER
+        // ============================================================
+        function renderChart(ticker, historyData) {
             if (!chart) {
                 chart = window.LightweightCharts.createChart(container, {
                     width: container.clientWidth,
@@ -351,110 +408,205 @@
                 });
             }
             chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-            const chartData = mapHistoryToChart(historyArray);
+
+            // Convert history to chart format
+            let chartData;
+            if (Array.isArray(historyData) && historyData.length > 0) {
+                // Check if it's OHLCV format (has 'close' field)
+                if (historyData[0].close !== undefined) {
+                    chartData = historyData.map(item => ({
+                        time: item.date || item.time,
+                        value: item.close
+                    }));
+                } else {
+                    // Assume it's a simple array of numbers
+                    chartData = mapHistoryToChart(historyData);
+                }
+            } else {
+                // Generate mock data
+                const basePrice = FALLBACK_DATA[ticker]?.price || 100;
+                const mockHistory = generateHistory(basePrice, 30);
+                chartData = mapHistoryToChart(mockHistory);
+            }
+
             lineSeries.setData(chartData);
             chart.timeScale().fitContent();
         }
 
-        // ----- WATCHLIST RENDER -----
-        function renderWatchlist(data) {
+        // ============================================================
+        //  WATCHLIST RENDER
+        // ============================================================
+        function renderWatchlist(stocks, liveData) {
             let html = '';
-            for (const ticker of TICKERS) {
-                const info = data[ticker] || FALLBACK_DATA[ticker];
-                const price = info.price || 0;
-                const change = info.change_pct || 0;
+            for (const stock of stocks) {
+                const ticker = stock.ticker;
+                const data = liveData[ticker] || FALLBACK_DATA[ticker] || { price: 0, change_pct: 0 };
+                const price = data.price || 0;
+                const change = data.change_pct || 0;
                 const cls = change >= 0 ? 'positive' : 'negative';
                 const sign = change >= 0 ? '+' : '';
+                const volume = data.volume || 0;
+
                 html += `
                     <div class="watchlist-item" data-ticker="${ticker}">
                         <span class="ticker">${ticker}</span>
                         <span class="price">${price.toFixed(2)}</span>
-                        <span class="change ${cls}">${sign}${change}%</span>
+                        <span class="change ${cls}">${sign}${change.toFixed(1)}%</span>
                     </div>
                 `;
             }
             watchlistEl.innerHTML = html;
+
+            // Add click handlers
             document.querySelectorAll('.watchlist-item').forEach(el => {
                 el.addEventListener('click', function() {
                     const ticker = this.dataset.ticker;
                     if (ticker && ticker !== currentTicker) {
                         currentTicker = ticker;
-                        updateChartFromData();
+                        loadChartData(ticker);
                     }
                 });
             });
         }
 
-        function updateChartFromData() {
-            const dataSource = cachedData || FALLBACK_DATA;
-            const info = dataSource[currentTicker];
-            if (info && info.history && info.history.length) {
-                renderChart(currentTicker, info.history);
-            } else {
-                const fallbackInfo = FALLBACK_DATA[currentTicker];
-                renderChart(currentTicker, fallbackInfo.history || [100, 101, 102, 101, 100]);
-            }
+        // ============================================================
+        //  LOAD CHART DATA
+        // ============================================================
+        async function loadChartData(ticker) {
+            const history = await getStockHistory(ticker);
+            renderChart(ticker, history);
         }
 
-        // ----- BACKGROUND REFRESH -----
-        async function refreshDataInBackground() {
-            try {
-                const fresh = await fetchMarketData();
-                if (fresh) {
-                    saveCache(fresh);
-                    renderWatchlist(fresh);
-                    const currentInfo = fresh[currentTicker];
-                    if (currentInfo && currentInfo.history) {
-                        renderChart(currentTicker, currentInfo.history);
-                    }
-                    updateCacheUI();
-                    setBeaconOnline(true);
-                }
-            } catch { /* silent */ }
-        }
-
-        // ----- INIT -----
-        async function init() {
+        // ============================================================
+        //  MAIN: LOAD DASHBOARD
+        // ============================================================
+        async function loadDashboard() {
+            // Check cache first
             const cached = loadCache();
             if (cached) {
                 cachedData = cached.data;
                 cacheTimestamp = cached.timestamp;
                 setBeaconOnline(true);
                 updateCacheUI();
-                renderWatchlist(cachedData);
-                updateChartFromData();
+
+                const stocks = cachedData.stocks || FALLBACK_STOCKS;
+                const liveData = cachedData.liveData || FALLBACK_DATA;
+                allStocks = stocks;
+                renderWatchlist(stocks, liveData);
+                loadChartData(currentTicker);
+
+                // Refresh in background
                 refreshDataInBackground();
-            } else {
-                setBeaconOnline(true);
-                const fresh = await fetchMarketData();
-                if (fresh) {
-                    saveCache(fresh);
-                    renderWatchlist(fresh);
-                    updateChartFromData();
-                } else {
-                    const fallback = {};
-                    for (const t of TICKERS) {
-                        fallback[t] = {
-                            price: FALLBACK_DATA[t].price,
-                            change_pct: FALLBACK_DATA[t].change_pct,
-                            history: FALLBACK_DATA[t].history.slice()
-                        };
-                    }
-                    cachedData = fallback;
-                    renderWatchlist(fallback);
-                    updateChartFromData();
-                    setBeaconOnline(false);
-                }
+                return;
             }
-            window.addEventListener('resize', () => {
-                if (chart) {
-                    chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+
+            // No cache - fetch from API
+            setBeaconOnline(true);
+            showStatus('⏳ Fetching Ugandan stocks from Mansa API...', 'loading');
+
+            try {
+                // STEP 1: Get all stocks on USE
+                const stocks = await getUSEStocks();
+                allStocks = stocks;
+
+                if (!stocks || stocks.length === 0) {
+                    throw new Error('No stocks returned from API');
                 }
-            });
+
+                showStatus(`📊 Found ${stocks.length} stocks on USE. Fetching live data...`, 'loading');
+
+                // STEP 2: Get live data for each stock
+                const liveData = {};
+                const promises = stocks.map(async (stock) => {
+                    const data = await getStockData(stock.ticker);
+                    liveData[stock.ticker] = data;
+                });
+                await Promise.allSettled(promises);
+
+                // STEP 3: Build complete dataset
+                const fullData = {
+                    stocks: stocks,
+                    liveData: liveData
+                };
+
+                // Save to cache
+                saveCache(fullData);
+
+                // Render watchlist
+                renderWatchlist(stocks, liveData);
+
+                // Load chart for default ticker
+                if (stocks.length > 0) {
+                    currentTicker = stocks[0].ticker;
+                    loadChartData(currentTicker);
+                }
+
+                setBeaconOnline(true);
+                showStatus(`✅ ${stocks.length} stocks loaded successfully`, 'success');
+
+            } catch (error) {
+                console.error('Dashboard load error:', error);
+                setBeaconOnline(false);
+
+                // Fallback to mock data
+                showStatus('⚠️ Using fallback data (API unavailable)', 'error');
+                allStocks = FALLBACK_STOCKS;
+                renderWatchlist(FALLBACK_STOCKS, FALLBACK_DATA);
+                currentTicker = FALLBACK_STOCKS[0].ticker;
+                loadChartData(currentTicker);
+
+                // Cache fallback data
+                const fallbackFull = {
+                    stocks: FALLBACK_STOCKS,
+                    liveData: FALLBACK_DATA
+                };
+                saveCache(fallbackFull);
+            }
         }
 
-        init();
+        // ============================================================
+        //  REFRESH IN BACKGROUND
+        // ============================================================
+        async function refreshDataInBackground() {
+            try {
+                const stocks = await getUSEStocks();
+                if (stocks && stocks.length > 0) {
+                    const liveData = {};
+                    const promises = stocks.map(async (stock) => {
+                        const data = await getStockData(stock.ticker);
+                        liveData[stock.ticker] = data;
+                    });
+                    await Promise.allSettled(promises);
+
+                    const fullData = { stocks, liveData };
+                    saveCache(fullData);
+                    renderWatchlist(stocks, liveData);
+                    setBeaconOnline(true);
+                }
+            } catch (error) {
+                console.warn('Background refresh failed:', error);
+            }
+        }
+
+        // ============================================================
+        //  INIT
+        // ============================================================
+        loadDashboard();
+
+        // Auto-refresh every 5 minutes
+        setInterval(() => {
+            refreshDataInBackground();
+        }, 5 * 60 * 1000);
+
+        // Update cache TTL display every 10 seconds
         setInterval(updateCacheUI, 10000);
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            if (chart) {
+                chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+            }
+        });
     </script>
 </body>
 </html>
