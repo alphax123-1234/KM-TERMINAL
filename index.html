@@ -185,16 +185,16 @@
     </div>
     <script>
         // ============================================================
-        //  ⚠️ CONFIGURATION - PASTE YOUR API KEY HERE
+        //  CONFIGURATION - PASTE YOUR API KEY HERE
         // ============================================================
-        const MANSA_TOKEN = 'YOUR_API_KEY_HERE'; // <-- REPLACE WITH YOUR KEY
+        const MANSA_TOKEN = 'YOUR_API_KEY_HERE';
         const EXCHANGE_CODE = 'USE';
         const API_BASE = 'https://mansaapi.com';
         const CACHE_KEY = 'use_market_cache';
         const TTL_MS = 30 * 60 * 1000;
 
         // ============================================================
-        //  FALLBACK DATA (works without API)
+        //  FALLBACK DATA WITH REALISTIC UGANDAN STOCKS
         // ============================================================
         const FALLBACK_STOCKS = [
             { ticker: 'MTNU', name: 'MTN Uganda', sector: 'Telecom' },
@@ -204,6 +204,43 @@
             { ticker: 'BOBU', name: 'Bank of Baroda Uganda', sector: 'Banking' },
             { ticker: 'NIC', name: 'National Insurance Corp', sector: 'Insurance' }
         ];
+
+        // Generate realistic historical data
+        function generateRealisticHistory(basePrice, days = 30, volatility = 0.03) {
+            const data = [];
+            let price = basePrice * 0.92;
+            const now = new Date();
+            
+            for (let i = days - 1; i >= 0; i--) {
+                const change = (Math.random() - 0.48) * volatility;
+                price = price * (1 + change);
+                if (price < 0.1) price = basePrice * 0.5;
+                
+                const date = new Date(now);
+                date.setDate(date.getDate() - i);
+                
+                data.push({
+                    date: date.toISOString().slice(0, 10),
+                    close: Math.round(price * 100) / 100,
+                    open: Math.round(price * (1 - (Math.random() * 0.01)) * 100) / 100,
+                    high: Math.round(price * (1 + (Math.random() * 0.015)) * 100) / 100,
+                    low: Math.round(price * (1 - (Math.random() * 0.015)) * 100) / 100,
+                    volume: Math.floor(Math.random() * 50000) + 10000
+                });
+            }
+            // Ensure last price matches base
+            data[data.length - 1].close = basePrice;
+            return data;
+        }
+
+        const FALLBACK_HISTORY = {
+            MTNU: generateRealisticHistory(2450.50, 30, 0.035),
+            SBU: generateRealisticHistory(380.00, 30, 0.04),
+            UCL: generateRealisticHistory(125.00, 30, 0.05),
+            DFCU: generateRealisticHistory(45.00, 30, 0.03),
+            BOBU: generateRealisticHistory(12.50, 30, 0.045),
+            NIC: generateRealisticHistory(8.50, 30, 0.04)
+        };
 
         const FALLBACK_DATA = {
             MTNU: { price: 2450.50, change_pct: 0.8, volume: 15000, high: 2480, low: 2390 },
@@ -234,38 +271,6 @@
         // ============================================================
         //  HELPERS
         // ============================================================
-        function generateHistory(basePrice, days = 30) {
-            const arr = [];
-            let price = basePrice * 0.85;
-            for (let i = 0; i < days; i++) {
-                const change = (Math.random() - 0.45) * 0.05;
-                price = price * (1 + change);
-                if (price < 0.1) price = basePrice * 0.5;
-                arr.push(Math.round(price * 100) / 100);
-            }
-            arr[arr.length - 1] = basePrice;
-            return arr;
-        }
-
-        function buildHistoryDates(length) {
-            const dates = [];
-            const now = new Date();
-            for (let i = length - 1; i >= 0; i--) {
-                const d = new Date(now);
-                d.setDate(d.getDate() - i);
-                dates.push(d.toISOString().slice(0, 10));
-            }
-            return dates;
-        }
-
-        function mapHistoryToChart(historyArray) {
-            const dates = buildHistoryDates(historyArray.length);
-            return historyArray.map((val, idx) => ({
-                time: dates[idx],
-                value: val
-            }));
-        }
-
         function setBeaconOnline(online) {
             beacon.className = online ? 'beacon' : 'beacon off';
             networkLabel.textContent = online ? 'LIVE' : 'OFFLINE';
@@ -311,10 +316,13 @@
         }
 
         // ============================================================
-        //  API ENDPOINT 1: GET ALL STOCKS ON USE
+        //  API ENDPOINTS
         // ============================================================
         async function getUSEStocks() {
             try {
+                if (!MANSA_TOKEN || MANSA_TOKEN === 'YOUR_API_KEY_HERE') {
+                    throw new Error('API key not configured');
+                }
                 const response = await fetch(
                     `${API_BASE}/api/v1/markets/exchanges/${EXCHANGE_CODE}/stocks`,
                     {
@@ -333,11 +341,11 @@
             }
         }
 
-        // ============================================================
-        //  API ENDPOINT 2: GET LIVE DATA FOR A STOCK
-        // ============================================================
         async function getStockData(ticker) {
             try {
+                if (!MANSA_TOKEN || MANSA_TOKEN === 'YOUR_API_KEY_HERE') {
+                    throw new Error('API key not configured');
+                }
                 const response = await fetch(
                     `${API_BASE}/api/v1/markets/exchanges/${EXCHANGE_CODE}/stocks/${ticker}`,
                     {
@@ -356,11 +364,11 @@
             }
         }
 
-        // ============================================================
-        //  API ENDPOINT 3: GET HISTORICAL DATA FOR CHART
-        // ============================================================
         async function getStockHistory(ticker, range = '1M') {
             try {
+                if (!MANSA_TOKEN || MANSA_TOKEN === 'YOUR_API_KEY_HERE') {
+                    throw new Error('API key not configured');
+                }
                 const response = await fetch(
                     `${API_BASE}/api/v1/markets/exchanges/${EXCHANGE_CODE}/stocks/${ticker}/history?range=${range}`,
                     {
@@ -374,78 +382,162 @@
                 const data = await response.json();
                 return data;
             } catch (error) {
-                console.warn(`Failed to fetch history for ${ticker}, generating mock:`, error);
-                const basePrice = FALLBACK_DATA[ticker]?.price || 100;
-                return generateHistory(basePrice, 30).map((val, idx) => ({
-                    date: buildHistoryDates(30)[idx],
-                    close: val,
-                    open: val * 0.98,
-                    high: val * 1.02,
-                    low: val * 0.97
-                }));
+                console.warn(`Failed to fetch history for ${ticker}, using fallback:`, error);
+                return FALLBACK_HISTORY[ticker] || generateRealisticHistory(100, 30);
             }
         }
 
         // ============================================================
-        //  CHART RENDER
+        //  CHART RENDER - FIXED VERSION
         // ============================================================
         function renderChart(ticker, historyData) {
+            // Create chart if it doesn't exist
             if (!chart) {
                 chart = window.LightweightCharts.createChart(container, {
                     width: container.clientWidth,
                     height: container.clientHeight,
-                    layout: { background: { color: '#131722' }, textColor: '#b2b9c7' },
-                    grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
-                    crosshair: { mode: window.LightweightCharts.CrosshairMode.Normal },
-                    timeScale: { borderColor: '#2a2e39' }
+                    layout: { 
+                        background: { color: '#131722' }, 
+                        textColor: '#b2b9c7' 
+                    },
+                    grid: { 
+                        vertLines: { color: '#1e222d' }, 
+                        horzLines: { color: '#1e222d' } 
+                    },
+                    crosshair: { 
+                        mode: window.LightweightCharts.CrosshairMode.Normal 
+                    },
+                    timeScale: { 
+                        borderColor: '#2a2e39',
+                        timeVisible: true,
+                        secondsVisible: false
+                    },
+                    rightPriceScale: {
+                        borderColor: '#2a2e39'
+                    }
                 });
                 lineSeries = chart.addLineSeries({
                     color: '#00ff66',
                     lineWidth: 2,
                     crosshairMarkerVisible: true,
                     priceLineVisible: true,
-                    priceLineColor: '#2a2e39'
+                    priceLineColor: '#2a2e39',
+                    lastValueVisible: true
                 });
             }
-            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
 
-            // Convert history to chart format
-            let chartData;
+            // Update chart size
+            chart.applyOptions({ 
+                width: container.clientWidth, 
+                height: container.clientHeight 
+            });
+
+            console.log(`Rendering chart for ${ticker}:`, historyData);
+
+            // Parse and format the data
+            let chartData = [];
+
             if (Array.isArray(historyData) && historyData.length > 0) {
-                // Check if it's OHLCV format (has 'close' field)
-                if (historyData[0].close !== undefined) {
+                // Check if it's OHLCV format (has 'close' or 'date' fields)
+                if (historyData[0].close !== undefined || historyData[0].date !== undefined) {
+                    // Format: [{date: '2025-01-01', close: 2450, ...}]
                     chartData = historyData.map(item => ({
-                        time: item.date || item.time,
-                        value: item.close
+                        time: item.date || item.time || String(item.timestamp || Date.now()),
+                        value: Number(item.close) || Number(item.price) || Number(item.value) || 0
                     }));
+                } else if (historyData[0].time !== undefined && historyData[0].value !== undefined) {
+                    // Already in chart format
+                    chartData = historyData;
                 } else {
-                    // Assume it's a simple array of numbers
-                    chartData = mapHistoryToChart(historyData);
+                    // Try to convert any array to chart data
+                    chartData = historyData.map((item, index) => {
+                        if (typeof item === 'number') {
+                            // Simple array of numbers
+                            const date = new Date();
+                            date.setDate(date.getDate() - (historyData.length - 1 - index));
+                            return {
+                                time: date.toISOString().slice(0, 10),
+                                value: item
+                            };
+                        } else if (item.price) {
+                            return {
+                                time: item.date || item.time || `2025-01-${String(index+1).padStart(2,'0')}`,
+                                value: Number(item.price)
+                            };
+                        } else {
+                            // Try to find any numeric field
+                            const keys = Object.keys(item);
+                            const numKey = keys.find(k => typeof item[k] === 'number');
+                            if (numKey) {
+                                return {
+                                    time: item.date || item.time || `2025-01-${String(index+1).padStart(2,'0')}`,
+                                    value: Number(item[numKey])
+                                };
+                            }
+                            return null;
+                        }
+                    }).filter(d => d !== null);
                 }
-            } else {
-                // Generate mock data
-                const basePrice = FALLBACK_DATA[ticker]?.price || 100;
-                const mockHistory = generateHistory(basePrice, 30);
-                chartData = mapHistoryToChart(mockHistory);
             }
 
-            lineSeries.setData(chartData);
-            chart.timeScale().fitContent();
+            // If no data, use fallback
+            if (chartData.length === 0) {
+                console.warn('No chart data, using fallback');
+                const fallback = FALLBACK_HISTORY[ticker] || generateRealisticHistory(100, 30);
+                chartData = fallback.map(item => ({
+                    time: item.date,
+                    value: item.close
+                }));
+            }
+
+            console.log(`Chart data points: ${chartData.length}`, chartData.slice(0, 5));
+
+            // Ensure data has valid values
+            chartData = chartData.filter(d => d.value > 0 && !isNaN(d.value));
+
+            if (chartData.length === 0) {
+                // Emergency fallback
+                chartData = generateRealisticHistory(100, 30).map(item => ({
+                    time: item.date,
+                    value: item.close
+                }));
+            }
+
+            // Set data and fit
+            try {
+                lineSeries.setData(chartData);
+                chart.timeScale().fitContent();
+            } catch (err) {
+                console.error('Chart render error:', err);
+                // Try with simplified data
+                const simplified = chartData.map(d => ({
+                    time: d.time,
+                    value: d.value
+                }));
+                lineSeries.setData(simplified);
+                chart.timeScale().fitContent();
+            }
         }
 
         // ============================================================
         //  WATCHLIST RENDER
         // ============================================================
         function renderWatchlist(stocks, liveData) {
+            if (!stocks || stocks.length === 0) {
+                showStatus('⚠️ No stocks available', 'error');
+                return;
+            }
+
             let html = '';
             for (const stock of stocks) {
-                const ticker = stock.ticker;
+                const ticker = stock.ticker || stock.symbol;
+                if (!ticker) continue;
+                
                 const data = liveData[ticker] || FALLBACK_DATA[ticker] || { price: 0, change_pct: 0 };
                 const price = data.price || 0;
                 const change = data.change_pct || 0;
                 const cls = change >= 0 ? 'positive' : 'negative';
                 const sign = change >= 0 ? '+' : '';
-                const volume = data.volume || 0;
 
                 html += `
                     <div class="watchlist-item" data-ticker="${ticker}">
@@ -455,6 +547,7 @@
                     </div>
                 `;
             }
+
             watchlistEl.innerHTML = html;
 
             // Add click handlers
@@ -473,8 +566,30 @@
         //  LOAD CHART DATA
         // ============================================================
         async function loadChartData(ticker) {
-            const history = await getStockHistory(ticker);
-            renderChart(ticker, history);
+            try {
+                // Try to get from cache first
+                if (cachedData && cachedData.history && cachedData.history[ticker]) {
+                    renderChart(ticker, cachedData.history[ticker]);
+                    return;
+                }
+
+                // Fetch from API
+                const history = await getStockHistory(ticker);
+                
+                // Cache it
+                if (cachedData) {
+                    if (!cachedData.history) cachedData.history = {};
+                    cachedData.history[ticker] = history;
+                    saveCache(cachedData);
+                }
+
+                renderChart(ticker, history);
+            } catch (error) {
+                console.error(`Failed to load chart for ${ticker}:`, error);
+                // Use fallback
+                const fallback = FALLBACK_HISTORY[ticker] || generateRealisticHistory(100, 30);
+                renderChart(ticker, fallback);
+            }
         }
 
         // ============================================================
@@ -493,7 +608,16 @@
                 const liveData = cachedData.liveData || FALLBACK_DATA;
                 allStocks = stocks;
                 renderWatchlist(stocks, liveData);
-                loadChartData(currentTicker);
+                
+                // Load chart for first stock
+                if (stocks.length > 0) {
+                    currentTicker = stocks[0].ticker || stocks[0].symbol;
+                    if (cachedData.history && cachedData.history[currentTicker]) {
+                        renderChart(currentTicker, cachedData.history[currentTicker]);
+                    } else {
+                        loadChartData(currentTicker);
+                    }
+                }
 
                 // Refresh in background
                 refreshDataInBackground();
@@ -517,16 +641,32 @@
 
                 // STEP 2: Get live data for each stock
                 const liveData = {};
+                const historyData = {};
                 const promises = stocks.map(async (stock) => {
-                    const data = await getStockData(stock.ticker);
-                    liveData[stock.ticker] = data;
+                    const ticker = stock.ticker || stock.symbol;
+                    if (!ticker) return;
+                    
+                    try {
+                        const data = await getStockData(ticker);
+                        liveData[ticker] = data;
+                        
+                        // Also fetch history for the first stock
+                        if (ticker === stocks[0].ticker) {
+                            const history = await getStockHistory(ticker);
+                            historyData[ticker] = history;
+                        }
+                    } catch (err) {
+                        console.warn(`Failed to fetch ${ticker}:`, err);
+                        liveData[ticker] = FALLBACK_DATA[ticker] || { price: 0, change_pct: 0 };
+                    }
                 });
                 await Promise.allSettled(promises);
 
                 // STEP 3: Build complete dataset
                 const fullData = {
                     stocks: stocks,
-                    liveData: liveData
+                    liveData: liveData,
+                    history: historyData
                 };
 
                 // Save to cache
@@ -537,8 +677,12 @@
 
                 // Load chart for default ticker
                 if (stocks.length > 0) {
-                    currentTicker = stocks[0].ticker;
-                    loadChartData(currentTicker);
+                    currentTicker = stocks[0].ticker || stocks[0].symbol;
+                    if (historyData[currentTicker]) {
+                        renderChart(currentTicker, historyData[currentTicker]);
+                    } else {
+                        loadChartData(currentTicker);
+                    }
                 }
 
                 setBeaconOnline(true);
@@ -553,12 +697,16 @@
                 allStocks = FALLBACK_STOCKS;
                 renderWatchlist(FALLBACK_STOCKS, FALLBACK_DATA);
                 currentTicker = FALLBACK_STOCKS[0].ticker;
-                loadChartData(currentTicker);
+                
+                // Load fallback chart
+                const fallbackHistory = FALLBACK_HISTORY[currentTicker] || generateRealisticHistory(100, 30);
+                renderChart(currentTicker, fallbackHistory);
 
                 // Cache fallback data
                 const fallbackFull = {
                     stocks: FALLBACK_STOCKS,
-                    liveData: FALLBACK_DATA
+                    liveData: FALLBACK_DATA,
+                    history: FALLBACK_HISTORY
                 };
                 saveCache(fallbackFull);
             }
@@ -573,12 +721,18 @@
                 if (stocks && stocks.length > 0) {
                     const liveData = {};
                     const promises = stocks.map(async (stock) => {
-                        const data = await getStockData(stock.ticker);
-                        liveData[stock.ticker] = data;
+                        const ticker = stock.ticker || stock.symbol;
+                        if (!ticker) return;
+                        const data = await getStockData(ticker);
+                        liveData[ticker] = data;
                     });
                     await Promise.allSettled(promises);
 
-                    const fullData = { stocks, liveData };
+                    const fullData = { 
+                        stocks, 
+                        liveData,
+                        history: cachedData?.history || {}
+                    };
                     saveCache(fullData);
                     renderWatchlist(stocks, liveData);
                     setBeaconOnline(true);
