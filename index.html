@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USE Terminal · Bloomberg Aesthetic</title>
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js">
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0b0e11;
+            color: #d1d4dc;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            height: 100vh;
+            overflow: hidden;
+            padding: 8px;
+        }
+        .terminal {
+            display: grid;
+            grid-template-columns: 240px 1fr;
+            grid-template-rows: 40px 1fr;
+            gap: 6px;
+            height: 100%;
+            max-width: 1440px;
+            margin: 0 auto;
+        }
+        .header {
+            grid-column: 1 / 3;
+            background: #131722;
+            border: 1px solid #2a2e39;
+            padding: 0 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            color: #b2b9c7;
+        }
+        .header-left {
+            display: flex;
+            gap: 24px;
+            align-items: center;
+        }
+        .header-left .exchange {
+            color: #00ff66;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .header-left .currency {
+            color: #a6b0c2;
+        }
+        .status-beacon {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .beacon {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #00ff66;
+            box-shadow: 0 0 8px #00ff66;
+            transition: 0.2s;
+        }
+        .beacon.off {
+            background: #ff3333;
+            box-shadow: 0 0 8px #ff3333;
+        }
+        .watchlist {
+            background: #131722;
+            border: 1px solid #2a2e39;
+            padding: 8px 0;
+            overflow-y: auto;
+            grid-row: 2 / 3;
+        }
+        .watchlist-item {
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1px solid #1e222d;
+            cursor: pointer;
+            transition: background 0.1s;
+            color: #d1d4dc;
+        }
+        .watchlist-item:hover {
+            background: #1e222d;
+        }
+        .watchlist-item .ticker {
+            font-weight: 700;
+            color: #f0f3fa;
+        }
+        .watchlist-item .price {
+            font-weight: 600;
+        }
+        .watchlist-item .change {
+            font-weight: 600;
+            min-width: 60px;
+            text-align: right;
+        }
+        .positive {
+            color: #00ff66;
+        }
+        .negative {
+            color: #ff3333;
+        }
+        .chart-panel {
+            background: #131722;
+            border: 1px solid #2a2e39;
+            padding: 4px;
+            position: relative;
+            grid-row: 2 / 3;
+        }
+        #chart-container {
+            width: 100%;
+            height: 100%;
+            background: #131722;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #131722;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2a2e39;
+        }
+        .cache-status {
+            color: #6b7a8f;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .cache-status span {
+            background: #1e222d;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="header">
+            <div class="header-left">
+                <span class="exchange">● USE · UGANDA SECURITIES EXCHANGE</span>
+                <span class="currency">CURRENCY: UGX</span>
+            </div>
+            <div class="cache-status">
+                <span id="cache-indicator">CACHE: --</span>
+                <span id="ttl-indicator">TTL: --</span>
+                <div class="status-beacon">
+                    <span id="network-beacon" class="beacon"></span>
+                    <span id="network-label">LIVE</span>
+                </div>
+            </div>
+        </div>
+        <div class="watchlist" id="watchlist"></div>
+        <div class="chart-panel">
+            <div id="chart-container"></div>
+        </div>
+    </div>
+    <script>
+        // ----- CONFIG -----
+        const MANSA_TOKEN = 'YOUR_API_KEY';
+        const API_BASE = 'https://mansaapi.com';
+        const CACHE_KEY = 'use_market_cache';
+        const TTL_MS = 30 * 60 * 1000;
+        const TICKERS = ['MTNU', 'SBU', 'UCL'];
+
+        // ----- FALLBACK MOCK (UGX) -----
+        const FALLBACK_DATA = {
+            MTNU: { price: 2450, change_pct: 0.8, history: [2420, 2430, 2440, 2450, 2460, 2455, 2450, 2445, 2450, 2455] },
+            SBU: { price: 380, change_pct: -1.2, history: [390, 388, 385, 382, 380, 378, 375, 372, 370, 368] },
+            UCL: { price: 125, change_pct: 2.4, history: [118, 120, 122, 124, 125, 126, 127, 128, 129, 130] }
+        };
+
+        // ----- STATE -----
+        let currentTicker = 'MTNU';
+        let chart = null;
+        let lineSeries = null;
+        let cachedData = null;
+        let cacheTimestamp = null;
+        const watchlistEl = document.getElementById('watchlist');
+        const container = document.getElementById('chart-container');
+        const cacheIndicator = document.getElementById('cache-indicator');
+        const ttlIndicator = document.getElementById('ttl-indicator');
+        const beacon = document.getElementById('network-beacon');
+        const networkLabel = document.getElementById('network-label');
+
+        // ----- HELPERS -----
+        function generateHistory(basePrice, days = 25) {
+            const arr = [];
+            let price = basePrice * 0.88;
+            for (let i = 0; i < days; i++) {
+                const change = (Math.random() - 0.45) * 0.04;
+                price = price * (1 + change);
+                if (price < 0.1) price = basePrice * 0.5;
+                arr.push(Math.round(price * 100) / 100);
+            }
+            arr[arr.length - 1] = basePrice;
+            return arr;
+        }
+
+        function ensureFallbackHistory() {
+            for (const t of TICKERS) {
+                if (!FALLBACK_DATA[t].history || FALLBACK_DATA[t].history.length < 10) {
+                    FALLBACK_DATA[t].history = generateHistory(FALLBACK_DATA[t].price, 25);
+                }
+            }
+        }
+        ensureFallbackHistory();
+
+        function buildHistoryDates(length) {
+            const dates = [];
+            const now = new Date();
+            for (let i = length - 1; i >= 0; i--) {
+                const d = new Date(now);
+                d.setDate(d.getDate() - i);
+                dates.push(d.toISOString().slice(0, 10));
+            }
+            return dates;
+        }
+
+        function mapHistoryToChart(historyArray) {
+            const dates = buildHistoryDates(historyArray.length);
+            return historyArray.map((val, idx) => ({
+                time: dates[idx] || `2025-01-${String(idx+1).padStart(2,'0')}`,
+                value: val
+            }));
+        }
+
+        // ----- CACHE -----
+        function loadCache() {
+            try {
+                const raw = localStorage.getItem(CACHE_KEY);
+                if (!raw) return null;
+                const parsed = JSON.parse(raw);
+                if (!parsed.data || !parsed.timestamp) return null;
+                if (Date.now() - parsed.timestamp > TTL_MS) return null;
+                return parsed;
+            } catch { return null; }
+        }
+
+        function saveCache(data) {
+            try {
+                localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data }));
+                cachedData = data;
+                cacheTimestamp = Date.now();
+                updateCacheUI();
+            } catch { /* ignore */ }
+        }
+
+        function updateCacheUI() {
+            if (cachedData && cacheTimestamp) {
+                const age = Date.now() - cacheTimestamp;
+                const remaining = Math.max(0, (TTL_MS - age) / 1000);
+                cacheIndicator.textContent = `CACHE: HIT`;
+                ttlIndicator.textContent = `TTL: ${Math.floor(remaining / 60)}m ${Math.floor(remaining % 60)}s`;
+            } else {
+                cacheIndicator.textContent = `CACHE: MISS`;
+                ttlIndicator.textContent = `TTL: --`;
+            }
+        }
+
+        function setBeaconOnline(online) {
+            beacon.className = online ? 'beacon' : 'beacon off';
+            networkLabel.textContent = online ? 'LIVE' : 'OFFLINE';
+        }
+
+        // ----- API FETCH -----
+        async function fetchMarketData() {
+            setBeaconOnline(true);
+            try {
+                if (!MANSA_TOKEN || MANSA_TOKEN === 'YOUR_API_KEY') {
+                    throw new Error('API token missing');
+                }
+                const response = await fetch(`${API_BASE}/stocks`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + MANSA_TOKEN,
+                        'Accept': 'application/json'
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const json = await response.json();
+                // expected: array of { symbol, price, change_pct, historical: [...] }
+                const mapped = {};
+                for (const item of json) {
+                    const sym = item.symbol;
+                    if (!sym) continue;
+                    const history = item.historical && Array.isArray(item.historical) ?
+                        item.historical.map(v => Number(v)) :
+                        generateHistory(Number(item.price) || 100, 25);
+                    mapped[sym] = {
+                        price: Number(item.price) || 0,
+                        change_pct: Number(item.change_pct) || 0,
+                        history: history
+                    };
+                }
+                // ensure fallback for missing tickers
+                for (const t of TICKERS) {
+                    if (!mapped[t]) {
+                        mapped[t] = {
+                            price: FALLBACK_DATA[t].price,
+                            change_pct: FALLBACK_DATA[t].change_pct,
+                            history: FALLBACK_DATA[t].history.slice()
+                        };
+                    }
+                }
+                return mapped;
+            } catch (err) {
+                setBeaconOnline(false);
+                // fallback mock
+                const fallback = {};
+                for (const t of TICKERS) {
+                    fallback[t] = {
+                        price: FALLBACK_DATA[t].price,
+                        change_pct: FALLBACK_DATA[t].change_pct,
+                        history: FALLBACK_DATA[t].history.slice()
+                    };
+                }
+                return fallback;
+            }
+        }
+
+        // ----- CHART RENDER -----
+        function renderChart(ticker, historyArray) {
+            if (!chart) {
+                chart = window.LightweightCharts.createChart(container, {
+                    width: container.clientWidth,
+                    height: container.clientHeight,
+                    layout: { background: { color: '#131722' }, textColor: '#b2b9c7' },
+                    grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+                    crosshair: { mode: window.LightweightCharts.CrosshairMode.Normal },
+                    timeScale: { borderColor: '#2a2e39' }
+                });
+                lineSeries = chart.addLineSeries({
+                    color: '#00ff66',
+                    lineWidth: 2,
+                    crosshairMarkerVisible: true,
+                    priceLineVisible: true,
+                    priceLineColor: '#2a2e39'
+                });
+            }
+            chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+            const chartData = mapHistoryToChart(historyArray);
+            lineSeries.setData(chartData);
+            chart.timeScale().fitContent();
+        }
+
+        // ----- WATCHLIST RENDER -----
+        function renderWatchlist(data) {
+            let html = '';
+            for (const ticker of TICKERS) {
+                const info = data[ticker] || FALLBACK_DATA[ticker];
+                const price = info.price || 0;
+                const change = info.change_pct || 0;
+                const cls = change >= 0 ? 'positive' : 'negative';
+                const sign = change >= 0 ? '+' : '';
+                html += `
+                    <div class="watchlist-item" data-ticker="${ticker}">
+                        <span class="ticker">${ticker}</span>
+                        <span class="price">${price.toFixed(2)}</span>
+                        <span class="change ${cls}">${sign}${change}%</span>
+                    </div>
+                `;
+            }
+            watchlistEl.innerHTML = html;
+            document.querySelectorAll('.watchlist-item').forEach(el => {
+                el.addEventListener('click', function() {
+                    const ticker = this.dataset.ticker;
+                    if (ticker && ticker !== currentTicker) {
+                        currentTicker = ticker;
+                        updateChartFromData();
+                    }
+                });
+            });
+        }
+
+        function updateChartFromData() {
+            const dataSource = cachedData || FALLBACK_DATA;
+            const info = dataSource[currentTicker];
+            if (info && info.history && info.history.length) {
+                renderChart(currentTicker, info.history);
+            } else {
+                const fallbackInfo = FALLBACK_DATA[currentTicker];
+                renderChart(currentTicker, fallbackInfo.history || [100, 101, 102, 101, 100]);
+            }
+        }
+
+        // ----- BACKGROUND REFRESH -----
+        async function refreshDataInBackground() {
+            try {
+                const fresh = await fetchMarketData();
+                if (fresh) {
+                    saveCache(fresh);
+                    renderWatchlist(fresh);
+                    const currentInfo = fresh[currentTicker];
+                    if (currentInfo && currentInfo.history) {
+                        renderChart(currentTicker, currentInfo.history);
+                    }
+                    updateCacheUI();
+                    setBeaconOnline(true);
+                }
+            } catch { /* silent */ }
+        }
+
+        // ----- INIT -----
+        async function init() {
+            const cached = loadCache();
+            if (cached) {
+                cachedData = cached.data;
+                cacheTimestamp = cached.timestamp;
+                setBeaconOnline(true);
+                updateCacheUI();
+                renderWatchlist(cachedData);
+                updateChartFromData();
+                refreshDataInBackground();
+            } else {
+                setBeaconOnline(true);
+                const fresh = await fetchMarketData();
+                if (fresh) {
+                    saveCache(fresh);
+                    renderWatchlist(fresh);
+                    updateChartFromData();
+                } else {
+                    const fallback = {};
+                    for (const t of TICKERS) {
+                        fallback[t] = {
+                            price: FALLBACK_DATA[t].price,
+                            change_pct: FALLBACK_DATA[t].change_pct,
+                            history: FALLBACK_DATA[t].history.slice()
+                        };
+                    }
+                    cachedData = fallback;
+                    renderWatchlist(fallback);
+                    updateChartFromData();
+                    setBeaconOnline(false);
+                }
+            }
+            window.addEventListener('resize', () => {
+                if (chart) {
+                    chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+                }
+            });
+        }
+
+        init();
+        setInterval(updateCacheUI, 10000);
+    </script>
+</body>
+</html>
