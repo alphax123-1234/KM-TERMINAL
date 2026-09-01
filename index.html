@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KM Terminal — Uganda Market Dashboard</title>
+<title>AEY Terminal — Uganda Market Dashboard</title>
 <meta name="description" content="A Uganda-focused market dashboard: USE equities, macro indicators, and agriculture spot prices.">
 
 <!-- Tailwind (CDN, JIT) -->
@@ -272,16 +272,17 @@ let STATE = {
 };
 
 async function loadAllData(){
-  const [macroLocal, stocksLocal, agriLocal, liveRate] = await Promise.all([
+  const [macroLocal, stocksLocal, bondsLocal, agriLocal, liveRate] = await Promise.all([
     loadJSON("./data/macro_indicators.json"),
     loadJSON("./data/stocks_daily.json"),
+    loadJSON("./data/fixed_income_yields.json"),
     loadJSON("./data/agriculture_spot.json"),
     fetchLiveUsdUgx()
   ]);
 
   STATE.macro = macroLocal || MOCK.macro;
   STATE.categories.equities = stocksLocal || MOCK.stocks;
-  STATE.categories.bonds = MOCK.bonds; // no local file requested for this in the brief
+  STATE.categories.bonds = bondsLocal || MOCK.bonds;
   STATE.categories.agri = agriLocal || MOCK.agri;
 
   if(liveRate){
@@ -329,7 +330,7 @@ function renderTicker(){
    ========================================================================== */
 const CATEGORY_META = {
   equities: { title: "USE Equities", note: "Manually updated from the USE daily bulletin. Not a live feed." },
-  bonds: { title: "Fixed Income (Bonds)", note: "Illustrative yield curve points. Not a live feed." },
+  bonds: { title: "Fixed Income (Bonds)", note: "T-bill/bond yields from BoU auction results — update weekly by hand. Not a live feed." },
   agri: { title: "Agriculture Spot Prices", note: "Illustrative placeholders. Not a live feed." }
 };
 
