@@ -1,0 +1,10 @@
+{
+  "as_of": "2026-08-28",
+  "note": "No free Ugandan commodity spot-price API exists — figures are illustrative placeholders. Replace with real quotes from a licensed source before using for trading decisions.",
+  "commodities": [
+    { "ticker": "COFFEE-ARB", "name": "Arabica Coffee (per kg, FAKA)", "price": 11800, "change_pct": 0.85, "sector": "Agriculture", "base_vol": 220 },
+    { "ticker": "COFFEE-ROB", "name": "Robusta Coffee (per kg, FAKA)", "price": 8200, "change_pct": -0.42, "sector": "Agriculture", "base_vol": 180 },
+    { "ticker": "MAIZE",      "name": "Maize (per kg, wholesale)", "price": 1450, "change_pct": 1.75, "sector": "Agriculture", "base_vol": 60 },
+    { "ticker": "BEANS",      "name": "Beans (per kg, wholesale)", "price": 3600, "change_pct": 0.0,  "sector": "Agriculture", "base_vol": 90 }
+  ]
+}
