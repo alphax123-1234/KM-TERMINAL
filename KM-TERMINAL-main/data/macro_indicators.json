@@ -1,9 +1,0 @@
-{
-  "as_of": "2026-08-28",
-  "note": "CBR, CPI and bond yield are manually updated from Bank of Uganda publications — no free live API exists for these. Edit this file periodically.",
-  "indicators": [
-    { "id": "CBR", "label": "CBR (Central Bank Rate)", "value": 9.5, "change": 0.0, "unit": "%" },
-    { "id": "CPI", "label": "Inflation (CPI)", "value": 3.6, "change": 0.2, "unit": "%" },
-    { "id": "BOND10Y", "label": "10-Year Bond Yield", "value": 15.85, "change": -0.05, "unit": "%" }
-  ]
-}
