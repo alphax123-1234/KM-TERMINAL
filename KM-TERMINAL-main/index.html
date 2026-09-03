@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEY Terminal — Uganda Market Dashboard</title>
+<meta name="description" content="A Uganda-focused market dashboard: USE equities, macro indicators, and agriculture spot prices.">
+
+<!-- Tailwind (CDN, JIT) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Lightweight Charts by TradingView -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lightweight-charts/4.1.3/lightweight-charts.standalone.production.js"></script>
+
+<style>
+  :root{
+    --bg-canvas: #0b0f14;
+    --bg-panel:  #10151c;
+    --bg-panel-2:#151b23;
+    --line:      #232b36;
+    --text-hi:   #e6ebf2;
+    --text-mid:  #8b97a8;
+    --text-dim:  #56616f;
+    --up:        #26a69a;
+    --down:      #ef5350;
+    --flat:      #6b7684;
+    --accent:    #4c8dff;
+  }
+  html,body{ background:var(--bg-canvas); color:var(--text-hi); font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif; }
+  .font-mono-data{ font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+  ::-webkit-scrollbar-thumb{ background:#2a323d; border-radius:4px; }
+  ::-webkit-scrollbar-thumb:hover{ background:#374150; }
+
+  /* Ticker ribbon marquee */
+  .ticker-track{
+    display:flex;
+    width:max-content;
+    animation: scroll-left 40s linear infinite;
+  }
+  .ticker-track:hover{ animation-play-state: paused; }
+  @keyframes scroll-left{
+    from{ transform: translateX(0); }
+    to{ transform: translateX(-50%); }
+  }
+
+  .nav-link{ transition: background-color .15s ease, color .15s ease; }
+  .nav-link.active{ background: rgba(76,141,255,0.12); color: var(--text-hi); border-left-color: var(--accent); }
+  .nav-link:not(.active):hover{ background: rgba(255,255,255,0.03); }
+
+  .range-btn.active{ background:var(--accent); color:#fff; }
+  .watch-row{ transition: background-color .12s ease; cursor:pointer; }
+  .watch-row:hover{ background: rgba(255,255,255,0.035); }
+  .watch-row.selected{ background: rgba(76,141,255,0.10); }
+  .watch-row.selected .sel-bar{ background: var(--accent); }
+
+  .badge-dot{ box-shadow: 0 0 0 3px rgba(255,255,255,0.04); }
+
+  @media (prefers-reduced-motion: reduce){
+    .ticker-track{ animation: none; }
+  }
+</style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- ============ TOP TICKER RIBBON ============ -->
+  <div class="w-full border-b border-[var(--line)] bg-[var(--bg-panel)] overflow-hidden select-none">
+    <div id="tickerTrack" class="ticker-track py-2">
+      <!-- populated by JS, duplicated once for seamless loop -->
+    </div>
+  </div>
+
+  <!-- ============ HEADER BAR ============ -->
+  <header class="flex items-center justify-between px-4 py-3 border-b border-[var(--line)] bg-[var(--bg-canvas)]">
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 rounded bg-[var(--accent)] flex items-center justify-center text-[13px] font-bold text-white">A</div>
+      <span class="font-semibold tracking-tight text-[15px]">AEY Terminal</span>
+      <span class="hidden sm:inline text-[11px] text-[var(--text-dim)] font-mono-data ml-1">UG MARKETS</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="clockOut" class="hidden md:inline text-[12px] font-mono-data text-[var(--text-mid)]"></span>
+      <span class="text-[11px] px-2 py-1 rounded border border-[var(--line)] text-[var(--text-mid)]">Data: mixed live / manual</span>
+    </div>
+  </header>
+
+  <!-- ============ MAIN LAYOUT ============ -->
+  <div class="flex flex-1 min-h-0">
+
+    <!-- LEFT SIDEBAR NAV -->
+    <aside class="hidden md:flex flex-col w-52 shrink-0 border-r border-[var(--line)] bg-[var(--bg-panel)] py-3">
+      <div class="px-4 pb-2 text-[11px] uppercase tracking-wide text-[var(--text-dim)]">Markets</div>
+      <nav class="flex flex-col gap-0.5">
+        <button data-category="equities" class="nav-link active flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] border-l-2 border-transparent text-[var(--text-mid)]">
+          <span>USE Equities</span>
+        </button>
+        <button data-category="bonds" class="nav-link flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] border-l-2 border-transparent text-[var(--text-mid)]">
+          <span>Fixed Income (Bonds)</span>
+        </button>
+        <button data-category="macro" class="nav-link flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] border-l-2 border-transparent text-[var(--text-mid)]">
+          <span>Macro Economics</span>
+        </button>
+        <button data-category="agri" class="nav-link flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] border-l-2 border-transparent text-[var(--text-mid)]">
+          <span>Agriculture Spot Prices</span>
+        </button>
+      </nav>
+
+      <div class="mt-auto px-4 pt-4 border-t border-[var(--line)] mx-1">
+        <p class="text-[11px] leading-relaxed text-[var(--text-dim)]">
+          USE, bond and agriculture figures are manually updated — no free live API exists for Ugandan market data.
+          USD/UGX is fetched live where possible.
+        </p>
+      </div>
+    </aside>
+
+    <!-- MOBILE CATEGORY BAR -->
+    <div class="md:hidden w-full border-b border-[var(--line)] bg-[var(--bg-panel)] overflow-x-auto">
+      <div class="flex gap-1 px-2 py-2 w-max">
+        <button data-category="equities" class="nav-link-m active px-3 py-1.5 rounded text-[12px] whitespace-nowrap text-[var(--text-mid)]">USE Equities</button>
+        <button data-category="bonds" class="nav-link-m px-3 py-1.5 rounded text-[12px] whitespace-nowrap text-[var(--text-mid)]">Bonds</button>
+        <button data-category="macro" class="nav-link-m px-3 py-1.5 rounded text-[12px] whitespace-nowrap text-[var(--text-mid)]">Macro</button>
+        <button data-category="agri" class="nav-link-m px-3 py-1.5 rounded text-[12px] whitespace-nowrap text-[var(--text-mid)]">Agriculture</button>
+      </div>
+    </div>
+
+    <!-- CENTRAL CHART AREA -->
+    <main class="flex-1 min-w-0 flex flex-col">
+      <div class="flex items-start justify-between px-4 pt-4 pb-2 flex-wrap gap-2">
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 id="chartTitle" class="text-lg font-semibold">MTN Uganda</h1>
+            <span id="chartTicker" class="text-[12px] font-mono-data text-[var(--text-dim)] px-1.5 py-0.5 rounded border border-[var(--line)]">MTNU</span>
+          </div>
+          <div class="flex items-baseline gap-2 mt-1">
+            <span id="chartPrice" class="text-2xl font-semibold font-mono-data">170.00</span>
+            <span id="chartChange" class="text-[13px] font-mono-data font-medium">+1.19%</span>
+          </div>
+        </div>
+        <div id="rangeButtons" class="flex items-center gap-1 bg-[var(--bg-panel)] rounded-md p-1 border border-[var(--line)]">
+          <!-- populated by JS -->
+        </div>
+      </div>
+
+      <div id="chartContainer" class="flex-1 min-h-[340px] px-2 pb-3"></div>
+
+      <p class="px-4 pb-3 text-[11px] text-[var(--text-dim)]">
+        Chart data is synthetically generated around the last known price for demonstration — plug a real feed into <code class="font-mono-data">./data/</code> or the fetch fallback in the script to replace it.
+      </p>
+    </main>
+
+    <!-- RIGHT SIDEBAR WATCHLIST -->
+    <aside class="hidden lg:flex flex-col w-80 shrink-0 border-l border-[var(--line)] bg-[var(--bg-panel)]">
+      <div class="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
+        <h2 id="watchlistTitle" class="text-[13px] font-semibold">Watchlist</h2>
+        <span id="watchlistAsOf" class="text-[10px] text-[var(--text-dim)] font-mono-data"></span>
+      </div>
+      <div class="grid grid-cols-[1fr,auto,auto] gap-2 px-4 py-2 text-[10px] uppercase tracking-wide text-[var(--text-dim)] border-b border-[var(--line)]">
+        <span>Ticker</span>
+        <span class="text-right">Price</span>
+        <span class="text-right">Chg %</span>
+      </div>
+      <div id="watchlistBody" class="flex-1 overflow-y-auto"></div>
+      <div class="px-4 py-2.5 border-t border-[var(--line)]">
+        <p id="watchlistNote" class="text-[10px] leading-relaxed text-[var(--text-dim)]"></p>
+      </div>
+    </aside>
+  </div>
+
+  <!-- MOBILE WATCHLIST (below chart on small screens) -->
+  <section class="lg:hidden border-t border-[var(--line)] bg-[var(--bg-panel)]">
+    <div class="px-4 py-3 flex items-center justify-between">
+      <h2 id="watchlistTitleM" class="text-[13px] font-semibold">Watchlist</h2>
+      <span id="watchlistAsOfM" class="text-[10px] text-[var(--text-dim)] font-mono-data"></span>
+    </div>
+    <div id="watchlistBodyM" class="divide-y divide-[var(--line)]"></div>
+  </section>
+
+<script>
+/* ==========================================================================
+   DATA LAYER
+   Tries, in order:
+   1. Local JSON files at ./data/*.json (same-origin fetch)
+   2. A public live endpoint for USD/UGX only (AllRatesToday free tier)
+   3. Hardcoded mock data baked into this script
+   Everything except the USD/UGX ticker is manually-updated illustrative
+   data — there is no free live API for USE equities, BoU rates, or Uganda
+   agriculture spot prices, so this dashboard does not pretend otherwise.
+   ========================================================================== */
+
+const MOCK = {
+  macro: {
+    as_of: "2026-08-28",
+    note: "Manually updated from Bank of Uganda publications — no free live API exists for these.",
+    indicators: [
+      { id: "CBR", label: "CBR (Central Bank Rate)", value: 9.5, change: 0.0, unit: "%" },
+      { id: "CPI", label: "Inflation (CPI)", value: 3.6, change: 0.2, unit: "%" },
+      { id: "BOND10Y", label: "10-Year Bond Yield", value: 15.85, change: -0.05, unit: "%" }
+    ]
+  },
+  stocks: {
+    as_of: "2026-08-28",
+    note: "Manually updated from the USE daily bulletin — treat as illustrative, not real-time.",
+    stocks: [
+      { ticker: "MTNU", name: "MTN Uganda", price: 170, change_pct: 1.19, sector: "Telecom", base_vol: 1.4 },
+      { ticker: "SBU", name: "Stanbic Bank Uganda", price: 42, change_pct: -0.71, sector: "Banking", base_vol: 1.1 },
+      { ticker: "UMEME", name: "Umeme Ltd", price: 275, change_pct: 0.36, sector: "Utilities", base_vol: 1.6 },
+      { ticker: "DFCU", name: "DFCU Bank", price: 210, change_pct: 0.0, sector: "Banking", base_vol: 1.8 },
+      { ticker: "BATU", name: "British American Tobacco Uganda", price: 8100, change_pct: -1.34, sector: "Consumer", base_vol: 3.2 },
+      { ticker: "NIC", name: "National Insurance Corp", price: 8.6, change_pct: 2.38, sector: "Insurance", base_vol: 0.5 }
+    ]
+  },
+  agri: {
+    as_of: "2026-08-28",
+    note: "No free Ugandan commodity spot-price API exists — figures are illustrative placeholders.",
+    commodities: [
+      { ticker: "COFFEE-ARB", name: "Arabica Coffee (per kg)", price: 11800, change_pct: 0.85, sector: "Agriculture", base_vol: 220 },
+      { ticker: "COFFEE-ROB", name: "Robusta Coffee (per kg)", price: 8200, change_pct: -0.42, sector: "Agriculture", base_vol: 180 },
+      { ticker: "MAIZE", name: "Maize (per kg, wholesale)", price: 1450, change_pct: 1.75, sector: "Agriculture", base_vol: 60 },
+      { ticker: "BEANS", name: "Beans (per kg, wholesale)", price: 3600, change_pct: 0.0, sector: "Agriculture", base_vol: 90 }
+    ]
+  }
+};
+
+// Bonds view reuses the 10Y yield as a small "curve" of illustrative points —
+// BoU does not publish a free machine-readable bond curve.
+MOCK.bonds = {
+  as_of: MOCK.macro.as_of,
+  note: "Illustrative yield curve — Bank of Uganda does not publish a machine-readable bond feed.",
+  stocks: [
+    { ticker: "T-BOND-2Y", name: "2-Year Treasury Bond", price: 14.10, change_pct: 0.0, sector: "Fixed Income", base_vol: 0.3 },
+    { ticker: "T-BOND-5Y", name: "5-Year Treasury Bond", price: 15.05, change_pct: -0.02, sector: "Fixed Income", base_vol: 0.4 },
+    { ticker: "T-BOND-10Y", name: "10-Year Treasury Bond", price: 15.85, change_pct: -0.05, sector: "Fixed Income", base_vol: 0.5 },
+    { ticker: "T-BOND-15Y", name: "15-Year Treasury Bond", price: 16.20, change_pct: 0.03, sector: "Fixed Income", base_vol: 0.6 }
+  ]
+};
+
+async function loadJSON(path){
+  try{
+    const res = await fetch(path, { cache: "no-store" });
+    if(!res.ok) throw new Error("bad status " + res.status);
+    return await res.json();
+  }catch(e){
+    return null;
+  }
+}
+
+async function fetchLiveUsdUgx(){
+  // AllRatesToday free tier — real endpoint, but requires a personal API key,
+  // so this call is expected to fail gracefully without one configured.
+  // Get a free key at https://allratestoday.com and set API_KEY below to enable it.
+  const API_KEY = ""; // <-- put your free AllRatesToday key here to go live
+  if(!API_KEY) return null;
+  try{
+    const res = await fetch(`https://allratestoday.com/api/v1/rates?source=USD&target=UGX`, {
+      headers: { Authorization: `Bearer ${API_KEY}` }
+    });
+    if(!res.ok) throw new Error("rate fetch failed");
+    const data = await res.json();
+    return data?.rate ?? null;
+  }catch(e){
+    return null;
+  }
+}
+
+let STATE = {
+  macro: null,
+  categories: { equities: null, bonds: null, agri: null },
+  usdUgx: { value: 3720, change: 0.0, live: false },
+  activeCategory: "equities",
+  selectedTicker: null,
+  activeRange: "1M"
+};
+
+async function loadAllData(){
+  const [macroLocal, stocksLocal, bondsLocal, agriLocal, liveRate] = await Promise.all([
+    loadJSON("./data/macro_indicators.json"),
+    loadJSON("./data/stocks_daily.json"),
+    loadJSON("./data/fixed_income_yields.json"),
+    loadJSON("./data/agriculture_spot.json"),
+    fetchLiveUsdUgx()
+  ]);
+
+  STATE.macro = macroLocal || MOCK.macro;
+  STATE.categories.equities = stocksLocal || MOCK.stocks;
+  STATE.categories.bonds = bondsLocal || MOCK.bonds;
+  STATE.categories.agri = agriLocal || MOCK.agri;
+
+  if(liveRate){
+    STATE.usdUgx = { value: liveRate, change: 0.0, live: true };
+  } else {
+    STATE.usdUgx = { value: 3720, change: 0.15, live: false };
+  }
+}
+
+/* ==========================================================================
+   TICKER RIBBON
+   ========================================================================== */
+function trendGlyph(change){
+  if(change > 0.001) return { glyph: "▲", cls: "text-[var(--up)]" };
+  if(change < -0.001) return { glyph: "▼", cls: "text-[var(--down)]" };
+  return { glyph: "—", cls: "text-[var(--flat)]" };
+}
+
+function renderTicker(){
+  const items = [
+    { label: "USD/UGX", value: STATE.usdUgx.value.toLocaleString(undefined,{maximumFractionDigits:1}), change: STATE.usdUgx.change, tag: STATE.usdUgx.live ? "LIVE" : "MANUAL" },
+    ...STATE.macro.indicators.map(i => ({ label: i.label, value: i.value.toFixed(2) + i.unit, change: i.change, tag: "MANUAL" }))
+  ];
+
+  const rowHtml = items.map(it => {
+    const t = trendGlyph(it.change);
+    return `
+      <div class="flex items-center gap-2 px-5 whitespace-nowrap">
+        <span class="text-[12px] text-[var(--text-mid)] font-medium">${it.label}</span>
+        <span class="text-[12px] font-mono-data text-[var(--text-hi)]">${it.value}</span>
+        <span class="text-[11px] font-mono-data ${t.cls}">${t.glyph} ${it.change > 0 ? "+" : ""}${it.change.toFixed(2)}</span>
+        <span class="text-[9px] px-1 py-0.5 rounded border border-[var(--line)] text-[var(--text-dim)]">${it.tag}</span>
+      </div>
+      <div class="w-px h-4 bg-[var(--line)] self-center"></div>
+    `;
+  }).join("");
+
+  const track = document.getElementById("tickerTrack");
+  // duplicate content once for a seamless CSS loop
+  track.innerHTML = rowHtml + rowHtml;
+}
+
+/* ==========================================================================
+   WATCHLIST
+   ========================================================================== */
+const CATEGORY_META = {
+  equities: { title: "USE Equities", note: "Manually updated from the USE daily bulletin. Not a live feed." },
+  bonds: { title: "Fixed Income (Bonds)", note: "T-bill/bond yields from BoU auction results — update weekly by hand. Not a live feed." },
+  agri: { title: "Agriculture Spot Prices", note: "Illustrative placeholders. Not a live feed." }
+};
+
+function currentList(){
+  return STATE.categories[STATE.activeCategory] || STATE.categories.equities;
+}
+
+function fmtPrice(n){
+  return n >= 1000 ? n.toLocaleString(undefined,{maximumFractionDigits:0}) : n.toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function renderWatchlist(){
+  const data = currentList();
+  const meta = CATEGORY_META[STATE.activeCategory] || CATEGORY_META.equities;
+
+  document.getElementById("watchlistTitle").textContent = meta.title;
+  document.getElementById("watchlistTitleM").textContent = meta.title;
+  document.getElementById("watchlistAsOf").textContent = "as of " + data.as_of;
+  document.getElementById("watchlistAsOfM").textContent = "as of " + data.as_of;
+  document.getElementById("watchlistNote").textContent = meta.note;
+
+  if(!STATE.selectedTicker || !data.stocks.find(s => s.ticker === STATE.selectedTicker)){
+    STATE.selectedTicker = data.stocks[0].ticker;
+  }
+
+  const rowsHtml = data.stocks.map(s => {
+    const up = s.change_pct > 0.001;
+    const down = s.change_pct < -0.001;
+    const colorCls = up ? "text-[var(--up)]" : down ? "text-[var(--down)]" : "text-[var(--flat)]";
+    const selected = s.ticker === STATE.selectedTicker ? "selected" : "";
+    return `
+      <button data-ticker="${s.ticker}" class="watch-row w-full grid grid-cols-[1fr,auto,auto] gap-2 items-center px-4 py-2.5 text-left border-l-2 border-transparent relative ${selected}">
+        <span class="sel-bar absolute left-0 top-0 bottom-0 w-0.5"></span>
+        <span class="min-w-0">
+          <span class="block text-[12.5px] font-semibold font-mono-data">${s.ticker}</span>
+          <span class="block text-[10.5px] text-[var(--text-dim)] truncate">${s.name}</span>
+        </span>
+        <span class="text-right text-[12.5px] font-mono-data">${fmtPrice(s.price)}</span>
+        <span class="text-right text-[12px] font-mono-data ${colorCls}">${up?"+":""}${s.change_pct.toFixed(2)}%</span>
+      </button>
+    `;
+  }).join("");
+
+  document.getElementById("watchlistBody").innerHTML = rowsHtml;
+  document.getElementById("watchlistBodyM").innerHTML = rowsHtml;
+
+  document.querySelectorAll("[data-ticker]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      STATE.selectedTicker = btn.getAttribute("data-ticker");
+      renderWatchlist();
+      updateChartHeader();
+      loadChartData(STATE.activeRange);
+    });
+  });
+}
+
+/* ==========================================================================
+   NAVIGATION
+   ========================================================================== */
+function setActiveCategory(cat){
+  STATE.activeCategory = cat === "macro" ? "equities" : cat; // macro has no own watchlist; keep equities showing
+  STATE.selectedTicker = null;
+
+  document.querySelectorAll(".nav-link").forEach(b => b.classList.toggle("active", b.dataset.category === cat));
+  document.querySelectorAll(".nav-link-m").forEach(b => b.classList.toggle("active", b.dataset.category === cat));
+
+  if(cat === "macro"){
+    // Macro has no ticker list; show macro indicators as the "watchlist" instead
+    renderMacroAsWatchlist();
+  } else {
+    renderWatchlist();
+    updateChartHeader();
+    loadChartData(STATE.activeRange);
+  }
+}
+
+function renderMacroAsWatchlist(){
+  document.getElementById("watchlistTitle").textContent = "Macro Economics";
+  document.getElementById("watchlistTitleM").textContent = "Macro Economics";
+  document.getElementById("watchlistAsOf").textContent = "as of " + STATE.macro.as_of;
+  document.getElementById("watchlistAsOfM").textContent = "as of " + STATE.macro.as_of;
+  document.getElementById("watchlistNote").textContent = STATE.macro.note;
+
+  const rowsHtml = STATE.macro.indicators.map(i => {
+    const t = trendGlyph(i.change);
+    return `
+      <div class="w-full grid grid-cols-[1fr,auto,auto] gap-2 items-center px-4 py-3 border-l-2 border-transparent">
+        <span class="text-[12.5px] font-medium">${i.label}</span>
+        <span class="text-right text-[12.5px] font-mono-data">${i.value.toFixed(2)}${i.unit}</span>
+        <span class="text-right text-[12px] font-mono-data ${t.cls}">${t.glyph} ${i.change.toFixed(2)}</span>
+      </div>
+    `;
+  }).join("");
+  document.getElementById("watchlistBody").innerHTML = rowsHtml;
+  document.getElementById("watchlistBodyM").innerHTML = rowsHtml;
+
+  document.getElementById("chartTitle").textContent = "USD/UGX";
+  document.getElementById("chartTicker").textContent = "MACRO";
+  document.getElementById("chartPrice").textContent = STATE.usdUgx.value.toLocaleString(undefined,{maximumFractionDigits:1});
+  const t = trendGlyph(STATE.usdUgx.change);
+  const el = document.getElementById("chartChange");
+  el.textContent = `${t.glyph} ${STATE.usdUgx.change.toFixed(2)}%`;
+  el.className = "text-[13px] font-mono-data font-medium " + t.cls;
+
+  loadChartData(STATE.activeRange, { synthetic: true, basePrice: STATE.usdUgx.value, vol: 8, ticker: "USDUGX" });
+}
+
+/* ==========================================================================
+   CHART
+   ========================================================================== */
+let chart, series;
+
+function initChart(){
+  const container = document.getElementById("chartContainer");
+  chart = LightweightCharts.createChart(container, {
+    layout: {
+      background: { type: "solid", color: "transparent" },
+      textColor: "#8b97a8",
+      fontSize: 11,
+      fontFamily: "JetBrains Mono, ui-monospace, monospace"
+    },
+    grid: {
+      vertLines: { color: "#1a212b" },
+      horzLines: { color: "#1a212b" }
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: "#4c8dff55", labelBackgroundColor: "#4c8dff" },
+      horzLine: { color: "#4c8dff55", labelBackgroundColor: "#4c8dff" }
+    },
+    rightPriceScale: { borderColor: "#232b36" },
+    timeScale: { borderColor: "#232b36", timeVisible: true },
+    autoSize: true
+  });
+
+  series = chart.addCandlestickSeries({
+    upColor: "#26a69a",
+    downColor: "#ef5350",
+    borderUpColor: "#26a69a",
+    borderDownColor: "#ef5350",
+    wickUpColor: "#26a69a",
+    wickDownColor: "#ef5350"
+  });
+
+  window.addEventListener("resize", () => chart.applyOptions({ width: container.clientWidth }));
+}
+
+const RANGE_CONFIG = {
+  "1D": { points: 96,  stepSeconds: 15 * 60 },
+  "1W": { points: 168, stepSeconds: 60 * 60 },
+  "1M": { points: 30,  stepSeconds: 24 * 60 * 60 },
+  "3M": { points: 90,  stepSeconds: 24 * 60 * 60 },
+  "1Y": { points: 260, stepSeconds: 24 * 60 * 60 },
+  "ALL":{ points: 520, stepSeconds: 24 * 60 * 60 }
+};
+
+function seededRandom(seed){
+  let s = seed % 2147483647;
+  if(s <= 0) s += 2147483646;
+  return function(){
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+function tickerSeed(ticker){
+  let h = 0;
+  for(let i=0;i<ticker.length;i++) h = (h*31 + ticker.charCodeAt(i)) | 0;
+  return Math.abs(h) || 1;
+}
+
+function generateCandles(ticker, basePrice, vol, points, stepSeconds){
+  const rand = seededRandom(tickerSeed(ticker) + points);
+  const now = Math.floor(Date.now()/1000);
+  let price = basePrice * (1 - 0.03); // start slightly below current so the series trends toward "now"
+  const candles = [];
+  for(let i = points; i >= 0; i--){
+    const time = now - i * stepSeconds;
+    const drift = (basePrice - price) * 0.02; // gentle pull toward basePrice
+    const noise = (rand() - 0.5) * vol;
+    const open = price;
+    price = Math.max(0.01, price + drift + noise);
+    const close = i === 0 ? basePrice : price;
+    const high = Math.max(open, close) + rand() * vol * 0.4;
+    const low = Math.max(0.01, Math.min(open, close) - rand() * vol * 0.4);
+    candles.push({ time, open, high, low, close });
+  }
+  return candles;
+}
+
+function loadChartData(range, override){
+  const cfg = RANGE_CONFIG[range] || RANGE_CONFIG["1M"];
+
+  let ticker, basePrice, vol;
+  if(override && override.synthetic){
+    ticker = override.ticker; basePrice = override.basePrice; vol = override.vol;
+  } else {
+    const list = currentList();
+    const stock = list.stocks.find(s => s.ticker === STATE.selectedTicker) || list.stocks[0];
+    ticker = stock.ticker; basePrice = stock.price; vol = stock.base_vol;
+  }
+
+  const candles = generateCandles(ticker, basePrice, vol, cfg.points, cfg.stepSeconds);
+  series.setData(candles);
+  chart.timeScale().fitContent();
+}
+
+function updateChartHeader(){
+  const list = currentList();
+  const stock = list.stocks.find(s => s.ticker === STATE.selectedTicker) || list.stocks[0];
+  document.getElementById("chartTitle").textContent = stock.name;
+  document.getElementById("chartTicker").textContent = stock.ticker;
+  document.getElementById("chartPrice").textContent = fmtPrice(stock.price);
+  const t = trendGlyph(stock.change_pct);
+  const el = document.getElementById("chartChange");
+  el.textContent = `${t.glyph} ${stock.change_pct > 0 ? "+" : ""}${stock.change_pct.toFixed(2)}%`;
+  el.className = "text-[13px] font-mono-data font-medium " + t.cls;
+}
+
+function renderRangeButtons(){
+  const ranges = ["1D","1W","1M","3M","1Y","ALL"];
+  const wrap = document.getElementById("rangeButtons");
+  wrap.innerHTML = ranges.map(r => `
+    <button data-range="${r}" class="range-btn ${r===STATE.activeRange?"active":""} px-2.5 py-1 rounded text-[11.5px] font-medium text-[var(--text-mid)] font-mono-data">${r}</button>
+  `).join("");
+  wrap.querySelectorAll("[data-range]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      STATE.activeRange = btn.getAttribute("data-range");
+      wrap.querySelectorAll("[data-range]").forEach(b => b.classList.toggle("active", b === btn));
+      if(STATE.activeCategory === "equities" && !STATE.categories.equities.stocks.find(s=>s.ticker===STATE.selectedTicker)){
+        // macro view active
+        loadChartData(STATE.activeRange, { synthetic: true, basePrice: STATE.usdUgx.value, vol: 8, ticker: "USDUGX" });
+      } else {
+        loadChartData(STATE.activeRange);
+      }
+    });
+  });
+}
+
+/* ==========================================================================
+   CLOCK
+   ========================================================================== */
+function tickClock(){
+  const el = document.getElementById("clockOut");
+  const now = new Date();
+  el.textContent = now.toLocaleString("en-UG", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) + " EAT";
+}
+
+/* ==========================================================================
+   NAV WIRING + BOOT
+   ========================================================================== */
+document.querySelectorAll(".nav-link, .nav-link-m").forEach(btn => {
+  btn.addEventListener("click", () => setActiveCategory(btn.dataset.category));
+});
+
+(async function boot(){
+  await loadAllData();
+  renderTicker();
+  renderRangeButtons();
+  initChart();
+  renderWatchlist();
+  updateChartHeader();
+  loadChartData(STATE.activeRange);
+  tickClock();
+  setInterval(tickClock, 1000);
+})();
+</script>
+</body>
+</html>
