@@ -50,3 +50,4 @@ data/macro_indicators.json    # CBR, CPI, bond yield (manual)
 data/stocks_daily.json        # USE watchlist (manual)
 data/agriculture_spot.json    # commodity spot prices (manual, illustrative)
 ```
+
